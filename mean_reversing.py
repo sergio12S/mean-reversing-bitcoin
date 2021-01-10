@@ -6,6 +6,7 @@ from tqdm import tqdm
 import pickle
 
 
+PARAMS = {"backtest": "all"}
 df = requests.get(
     "https://aipricepatterns.com/api/api/backtest", params=PARAMS)
 data = df.json()['backtest']
@@ -20,7 +21,7 @@ data['dayofweek'] = data.index.dayofweek
 SIGMA = np.arange(1, 4, 1)
 LAG = np.arange(1, 10, 1)
 WINDOW_MA = np.arange(50, 200, 50)
-WINDOW_STD = np.arange(100, 500, 100) # np.arange(100, 500, 50)
+WINDOW_STD = np.arange(100, 500, 100)  # np.arange(100, 500, 50)
 
 
 def optimal_parameter(sigma, lag, window_ma, window_std, plot=False):

@@ -1,18 +1,12 @@
 import requests
 import pandas as pd
 import numpy as np
-from backtester import Backtester
-from tqdm import tqdm
-import pickle
+
 from sklearn.tree import DecisionTreeRegressor  # the dt regressor
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from sklearn import tree
 import graphviz
-from six import StringIO
-from IPython.display import Image
-import pydotplus
-from IPython.core.pylabtools import figsize
 
 
 PARAMS = {"backtest": "all"}
