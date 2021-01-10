@@ -2,8 +2,8 @@ import requests
 import pandas as pd
 import numpy as np
 from backtester import Backtester
+from tqdm import tqdm
 import pickle
-
 
 PARAMS = {"backtest": "all"}
 df = requests.get(
@@ -18,7 +18,7 @@ data['dayofweek'] = data.index.dayofweek
 
 
 SIGMA = np.arange(1, 4, 1)
-LAG = np.arange(1, 10, 2)
+LAG = np.arange(1, 10, 1)
 WINDOW_MA = np.arange(50, 200, 50)
 WINDOW_STD = np.arange(100, 500, 100)
 
@@ -62,12 +62,12 @@ def optimal_parameter(sigma, lag, window_ma, window_std, plot=False):
 def create_rules(data, sigma, lag, window_ma, window_std, rules=10):
     back = Backtester(df=data, takeProfit=0.005, stopLoss=-0.005)
     count_rules = 0
-    data_rules = []
 
-    for s in sigma:
-        for la in lag:
-            for w_ma in window_ma:
-                for w_std in window_std:
+    data_rules = []
+    for s in tqdm(SIGMA):
+        for la in LAG:
+            for w_ma in WINDOW_MA:
+                for w_std in WINDOW_STD:
                     data = optimal_parameter(
                         sigma=s, lag=la, window_ma=w_ma, window_std=w_std,
                         plot=False
@@ -76,19 +76,20 @@ def create_rules(data, sigma, lag, window_ma, window_std, rules=10):
                                             lag=LAG,
                                             comission=0,
                                             reverse=False)
-                    # How works startegy depends on day of week
+
+                    # How works statregy depends on day of week
                     analyse_data_of_week = data[['return', 'dayofweek']]\
                         .groupby('dayofweek').agg(['mean']).reset_index()
                     analyse_data_of_week.columns = ['day_of_week', 'mean']
 
-                    # How works strategy depends on hours
-                    analyse_hours = data[['return', 'hours']]\
-                        .groupby('hours').agg(['mean']).reset_index()
+                    # How works statregy depends on hours
+                    analyse_hours = data[['return', 'hours']].\
+                        groupby('hours').agg(['mean']).reset_index()
                     analyse_hours.columns = ['hours', 'mean']
 
-                    # How works strategy depeds on minutes
-                    analyse_minutes = data[['return', 'minutes']]\
-                        .groupby('minutes').agg(['mean']).reset_index()
+                    # How works statregy depends on minutes
+                    analyse_minutes = data[['return', 'minutes']].\
+                        groupby('minutes').agg(['mean']).reset_index()
                     analyse_minutes.columns = ['minutes', 'mean']
 
                     statistics = {
@@ -97,19 +98,19 @@ def create_rules(data, sigma, lag, window_ma, window_std, rules=10):
                         "median": data[data['return'] != 0]['return'].median(),
                         'count': data[data['return'] != 0]['return'].count(),
                         'rules': {
-                            "SIGMA": s,
-                            "LAG": la,
-                            "WINDOW_MA": w_ma,
-                            "WINDOW_STD": w_std,
+                            "sigma": s,
+                            "lag": la,
+                            "window_ma": w_ma,
+                            "window_std": w_std,
                             "day_of_week": analyse_data_of_week
-                            .to_dict(orient='records'),
+                            .to_dict(orient="records"),
                             "hours": analyse_hours
-                            .to_dict(orient='records'),
+                            .to_dict(orient="records"),
                             "minutes": analyse_minutes
-                            .to_dict(orient='records')
+                            .to_dict(orient="records")
                         }
                     }
-
+                    # print(statistics)
                     data_rules.append(dict(statistics))
                     count_rules += 1
                     if count_rules == rules:
@@ -126,19 +127,15 @@ data_rules = create_rules(
     rules=300
 )
 # Save rules
-with open("rules_strategy.pickle", "wb") as p:
+with open("rules_strategy.pickle", 'wb') as p:
     pickle.dump(data_rules, p, protocol=pickle.HIGHEST_PROTOCOL)
 
 # Load rules
-with open("rules_strategy.pickle", "rb") as p:
-    data_rules = pickle.load(p)
 
+with open("rules_strategy.pickle", 'rb') as p:
+    data_rules = pickle.load(p)
 
 # Top N rules
 TOP = 10
 best_rules = sorted(data_rules, key=lambda i: i['cumsum'], reverse=True)[:TOP]
 print(best_rules[0]['rules'])
-
-# Honme work
-
-# Generate 300 rules
