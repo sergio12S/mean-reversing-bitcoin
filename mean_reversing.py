@@ -5,7 +5,7 @@ from backtester import Backtester
 from tqdm import tqdm
 import pickle
 
-PARAMS = {"backtest": "all"}
+
 df = requests.get(
     "https://aipricepatterns.com/api/api/backtest", params=PARAMS)
 data = df.json()['backtest']
@@ -20,7 +20,7 @@ data['dayofweek'] = data.index.dayofweek
 SIGMA = np.arange(1, 4, 1)
 LAG = np.arange(1, 10, 1)
 WINDOW_MA = np.arange(50, 200, 50)
-WINDOW_STD = np.arange(100, 500, 100)
+WINDOW_STD = np.arange(100, 500, 100) # np.arange(100, 500, 50)
 
 
 def optimal_parameter(sigma, lag, window_ma, window_std, plot=False):
@@ -113,6 +113,8 @@ def create_rules(data, sigma, lag, window_ma, window_std, rules=10):
                     # print(statistics)
                     data_rules.append(dict(statistics))
                     count_rules += 1
+                    print('Rules: ', count_rules)
+                    print('Backtest result: ', data['cumsum'].values[-1])
                     if count_rules == rules:
                         return data_rules
     return data_rules
@@ -136,6 +138,36 @@ with open("rules_strategy.pickle", 'rb') as p:
     data_rules = pickle.load(p)
 
 # Top N rules
-TOP = 10
-best_rules = sorted(data_rules, key=lambda i: i['cumsum'], reverse=True)[:TOP]
-print(best_rules[0]['rules'])
+TOP = 1
+best_rules = sorted(data_rules, key=lambda i: i['cumsum'], reverse=True)[
+    :TOP][0]['rules']
+best_rules['minutes']
+
+# Best strategy
+data = optimal_parameter(sigma=best_rules['sigma'], lag=best_rules['lag'],
+                         window_ma=best_rules['window_ma'],
+                         window_std=best_rules['window_std'],
+                         plot=False)
+
+# Time Rules for Mean Revesing strategy
+
+# 1 Exclude day 6
+data['signal'] = np.where(data['dayofweek'] == 6, 0, data['signal'])
+
+# 2 Exclude hours
+data['signal'] = np.where(data['hours'] == 0, 0, data['signal'])
+data['signal'] = np.where(data['hours'] == 15, 0, data['signal'])
+data['signal'] = np.where(data['hours'] == 14, 0, data['signal'])
+data['signal'] = np.where(data['hours'] == 21, 0, data['signal'])
+data['signal'] = np.where(data['hours'] == 22, 0, data['signal'])
+
+# 3 Exclude minutes Home Work
+
+
+# Try backtest
+back = Backtester(df=data, takeProfit=0.005, stopLoss=-0.005)
+data = back.do_backtest(exitPosition="signal",
+                        lag=LAG,
+                        comission=0,
+                        reverse=False)
+data['cumsum'].plot()
