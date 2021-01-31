@@ -4,6 +4,8 @@ import numpy as np
 from backtester import Backtester
 from tqdm import tqdm
 import pickle
+# from statsmodels.tsa.stattools import adfuller
+# from sklearn.tree import DecisionTreeRegressor
 
 
 PARAMS = {"backtest": "all"}
@@ -16,6 +18,8 @@ data.index = pd.to_datetime(data.index)
 data['hours'] = data.index.hour
 data['minutes'] = data.index.minute
 data['dayofweek'] = data.index.dayofweek
+# data['stationarity'] = data['Close'].rolling(
+#     72).apply(lambda x: adfuller(x)[1])
 
 
 SIGMA = np.arange(1, 4, 1)
@@ -134,7 +138,6 @@ with open("rules_strategy.pickle", 'wb') as p:
     pickle.dump(data_rules, p, protocol=pickle.HIGHEST_PROTOCOL)
 
 # Load rules
-
 with open("rules_strategy.pickle", 'rb') as p:
     data_rules = pickle.load(p)
 
@@ -162,13 +165,58 @@ data['signal'] = np.where(data['hours'] == 14, 0, data['signal'])
 data['signal'] = np.where(data['hours'] == 21, 0, data['signal'])
 data['signal'] = np.where(data['hours'] == 22, 0, data['signal'])
 
-# 3 Exclude minutes Home Work
+
+# 3 Delete stationarity HM
+# https://www.tradelikeamachine.com/blog/cointegration-pairs-trading/part-3-stationary-time-series-for-pairs-trading-systems
+data['signal'] = np.where((data['stationarity'] >= 0.2) & (
+    data['stationarity'] <= 0.4), data['signal'], 0)
+
+
+# 4 Apply machine learning
+loaded_model = pickle.load(open('ml_model_tree', 'rb'))
+WINDOW_MA = np.arange(50, 200, 10)
+# Define new WINDOW_MA variable
+for i in WINDOW_MA:
+    data['chg'] = data['Close'].pct_change(1)
+    data['ma_24'] = data['chg'].rolling(window=i).median()
+    data[f'window_{i}'] = data['ma_24'].rolling(window=i).std()
+data = data.dropna()
+columns = ['Volume',
+           'hours',
+           'minutes',
+           'dayofweek',
+           'chg',
+           'ma_24',
+           'window_50',
+           'window_60',
+           'window_70',
+           'window_80',
+           'window_90',
+           'window_100',
+           'window_110',
+           'window_120',
+           'window_130',
+           'window_140',
+           'window_150',
+           'window_160',
+           'window_170',
+           'window_180',
+           'window_190']
+data['predict'] = loaded_model.predict(
+    data.loc[:, columns].values)
+
+# HM change predict value from 0 to 0.005
+data['signal'] = np.where(
+    ((data['predict'] > 0.005) & (data['signal'] == 1)) |
+    ((data['predict'] < -0.005) & (data['signal'] == -1)),
+    data['signal'], 0)
 
 
 # Try backtest
 back = Backtester(df=data, takeProfit=0.005, stopLoss=-0.005)
 data = back.do_backtest(exitPosition="signal",
-                        lag=LAG,
+                        lag=best_rules['lag'],
                         comission=0,
                         reverse=False)
+
 data['cumsum'].plot()
