@@ -180,7 +180,7 @@ for i in WINDOW_MA:
     data['chg'] = data['Close'].pct_change(1)
     data['ma_24'] = data['chg'].rolling(window=i).median()
     data[f'window_{i}'] = data['ma_24'].rolling(window=i).std()
-data = data.dropna()
+
 columns = ['Volume',
            'hours',
            'minutes',
@@ -202,13 +202,15 @@ columns = ['Volume',
            'window_170',
            'window_180',
            'window_190']
+
+data = data.dropna()
 data['predict'] = loaded_model.predict(
     data.loc[:, columns].values)
 
 # HM change predict value from 0 to 0.005
 data['signal'] = np.where(
-    ((data['predict'] > 0.005) & (data['signal'] == 1)) |
-    ((data['predict'] < -0.005) & (data['signal'] == -1)),
+    ((data['predict'] > 0.002) & (data['signal'] == 1)) |
+    ((data['predict'] < -0.002) & (data['signal'] == -1)),
     data['signal'], 0)
 
 
@@ -216,7 +218,15 @@ data['signal'] = np.where(
 back = Backtester(df=data, takeProfit=0.005, stopLoss=-0.005)
 data = back.do_backtest(exitPosition="signal",
                         lag=best_rules['lag'],
-                        comission=0,
+                        comission=0.001,
                         reverse=False)
 
 data['cumsum'].plot()
+# Count positive trade
+len(data[data['return'] > 0]['return']) / \
+    np.count_nonzero(data['return'].values)
+data['signal'].plot()
+
+# Margin
+data['margin'] = data['return'] * 125
+data['margin'].cumsum().plot()

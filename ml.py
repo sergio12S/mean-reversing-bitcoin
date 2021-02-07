@@ -68,11 +68,14 @@ dregressor = dregressor.fit(X_train, y_train)
 pickle.dump(dregressor, open('ml_model_tree', 'wb'))
 
 # Analyse accuracy
-predict = np.where(dregressor.predict(X_test) > 0, 1, 0)
-fact = np.where(y_test > 0, 1, 0)
-np.sum(predict == fact) / len(X_test)
+# predict = np.where(dregressor.predict(X_test) > 0, 1, 0)
+# fact = np.where(y_test > 0, 1, 0)
+# np.sum(predict == fact) / len(X_test)
 # plt.scatter(dregressor.predict(X_train), y_train)
 # dot_data = tree.export_graphviz(dregressor, feature_names=list(
 #     data.loc[:, 'window_50':'window_190'].columns), filled=True)
 # graph = graphviz.Source(dot_data, format='png')
 # graph
+
+# if __name__ == "__main__":
+#     pass

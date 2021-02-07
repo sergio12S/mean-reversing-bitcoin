@@ -35,9 +35,10 @@ class MeanReversing:
                         'window_190']
         self.SIGMA = np.arange(1, 4, 1)
         self.LAG = np.arange(1, 10, 1)
-        # self.WINDOW_MA = np.arange(50, 200, 50)
+        self.lag_predict = 3
         self.WINDOW_STD = np.arange(100, 500, 100)
         self.rules = []
+        self.threshold = 0.003
 
     def _get_dataset(self):
 
@@ -54,6 +55,8 @@ class MeanReversing:
         return data
 
     def _create_features(self, data):
+        data['y'] = data['Close'].shift(-1).pct_change()
+
         for i in self.WINDOW_MA:
             data['chg'] = data['Close'].pct_change(1)
             data['ma_24'] = data['chg'].rolling(window=i).median()
@@ -103,7 +106,7 @@ class MeanReversing:
             data[data['signal'] == -1]['lag'].cumsum().plot()
         return data
 
-    def _create_rules(self, data, sigma, lag, window_ma, window_std, rules=10):
+    def _create_rules(self, data, rules=300):
         back = Backtester(df=data, takeProfit=0.005, stopLoss=-0.005)
         count_rules = 0
 
@@ -112,7 +115,7 @@ class MeanReversing:
             for la in self.LAG:
                 for w_ma in self.WINDOW_MA:
                     for w_std in self.WINDOW_STD:
-                        data = self.optimal_parameter(
+                        data = self._optimal_parameter(
                             sigma=s, lag=la, window_ma=w_ma, window_std=w_std,
                             plot=False
                         )
@@ -183,10 +186,11 @@ class MeanReversing:
         with open("rules_strategy.pickle", 'rb') as p:
             self.rules = pickle.load(p)
 
-    def create_machine_learning_models(self):
-        data = self._get_dataset()
+    def create_machine_learning_models(self, data):
+        # data = self._get_dataset()
         data = self._create_features(data)
-        self._machine_learning_tree()
+        data = data.dropna()
+        self._machine_learning_tree(data=data)
 
     def _best_rules(self):
         self._load_rules()
@@ -195,11 +199,9 @@ class MeanReversing:
         best_rules = sorted(self.rules, key=lambda i: i['cumsum'],
                             reverse=True)[
             :TOP][0]['rules']
-        best_rules['minutes']
-        return
+        return best_rules
 
-    def create_signal(self):
-        data = self._get_dataset()
+    def create_signal(self, data):
         data = self._create_features(data)
         loaded_model = pickle.load(open('ml_model_tree', 'rb'))
         best_rules = self._best_rules()
@@ -208,20 +210,45 @@ class MeanReversing:
                                        window_ma=best_rules['window_ma'],
                                        window_std=best_rules['window_std'],
                                        plot=False)
+        data = data.dropna()
         data['predict'] = loaded_model.predict(
             data.loc[:, self.columns].values)
         data['signal'] = np.where(
-            ((data['predict'] > 0) & (data['signal'] == 1)) |
-            ((data['predict'] < 0) & (data['signal'] == -1)),
+            ((data['predict'] > self.threshold) & (data['signal'] == 1)) |
+            ((data['predict'] < self.threshold) & (data['signal'] == -1)),
             data['signal'], 0)
+        return data
+
+    def backtest(self, data, comission=0, ml=True):
+        data = self.create_signal(data)
+        best_rules = self._best_rules()
+        back = Backtester(df=data, takeProfit=0.005, stopLoss=-0.005)
+        data = back.do_backtest(exitPosition="signal",
+                                lag=best_rules['lag'],
+                                comission=comission,
+                                reverse=False)
         return data
 
 
 strategy = MeanReversing()
-data = strategy.create_signal()
+# data = strategy.create_signal()
 
-# Debug our code
+# 0. Get dataset from server
 data = strategy._get_dataset()
-data = strategy._create_features(data)
-loaded_model = pickle.load(open('ml_model_tree', 'rb'))
-best_rules = strategy._best_rules()
+
+# Step developing
+
+# 1. Create rules
+strategy._create_rules(
+    data=data,
+    rules=300
+)
+# 2. Create machine learning model
+data = strategy.create_machine_learning_models(data)
+
+# 3. Create signals
+data = strategy.create_signal(data=data)
+
+# 4. Backtest mean reversing with machine learning
+data = strategy.backtest(data)
+data['cumsum'].plot()
