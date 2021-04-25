@@ -38,7 +38,7 @@ class Manager:
             Time=self.data.index.to_pydatetime()[0],
             Open=float(self.data['close']),
             Lag=int(self.lag),
-            Signal=int(self.data['signals'])
+            Signal=int(self.data['signal'])
         )
         current_session.add(new_trade)
         current_session.commit()
@@ -48,7 +48,7 @@ class Manager:
             'status': 'open',
             'time': self.data.index.to_pydatetime()[0],
             'open': float(self.data['close']),
-            'signal': int(self.data['signals'])
+            'signal': int(self.data['signal'])
         }
         return status
 
@@ -59,7 +59,7 @@ class Manager:
             Time=self.data.index.to_pydatetime()[0],
             Open=float(self.data['close']),
             Lag=int(self.lag),
-            Signal=int(self.data['signals'])
+            Signal=int(self.data['signal'])
         )
         current_session.add(new_trade)
         current_session.commit()
@@ -69,7 +69,7 @@ class Manager:
             'status': 'open',
             'time': self.data.index.to_pydatetime()[0],
             'open': float(self.data['close']),
-            'signal': int(self.data['signals'])
+            'signal': int(self.data['signal'])
         }
         return status
 
@@ -91,7 +91,7 @@ class Manager:
             'status': 'close',
             'time': self.data.index.to_pydatetime()[0],
             'close': float(self.data['close']),
-            'signal': int(self.data['signals']),
+            'signal': int(self.data['signal']),
             'profit': profit
         }
         return status
@@ -114,7 +114,7 @@ class Manager:
             'status': 'close',
             'time': self.data.index.to_pydatetime()[0],
             'close': float(self.data['close']),
-            'signal': int(self.data['signals']),
+            'signal': int(self.data['signal']),
             'profit': profit
         }
         return status
@@ -132,21 +132,21 @@ class Manager:
         event = self.check_status()
         if not event:
             # open long
-            if int(self.data['signals'] == 1):
+            if int(self.data['signal'] == 1):
                 status = self.open_long()
                 return status
             # open short
-            if int(self.data['signals'] == -1):
+            if int(self.data['signal'] == -1):
                 status = self.open_short()
                 return status
         if event:
             if event.Status == 'close':
                 # open long
-                if int(self.data['signals'] == 1):
+                if int(self.data['signal'] == 1):
                     status = self.open_long()
                     return status
                 # close long
-                if int(self.data['signals'] == -1):
+                if int(self.data['signal'] == -1):
                     status = self.open_short()
                     return status
             if event.Status == 'open':
@@ -171,9 +171,9 @@ class Manager:
                         profit=current_profit, event=event)
                     return status
                 # close by signal
-                if int(self.data['signals'] != event.Signal):
-                    if int(self.data['signals']) == 1 or \
-                            int(self.data['signals']) == -1:
+                if int(self.data['signal'] != event.Signal):
+                    if int(self.data['signal']) == 1 or \
+                            int(self.data['signal']) == -1:
                         status = self.exit_position(
                             profit=current_profit, event=event)
                         return status

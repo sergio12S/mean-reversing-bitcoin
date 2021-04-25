@@ -1,6 +1,5 @@
 from loguru import logger
 import numpy as np
-# from sklearn.ensemble import RandomForestRegressor
 from sklearn.tree import DecisionTreeRegressor
 import pickle
 from datetime import datetime
@@ -8,9 +7,9 @@ from backtester import Backtest
 from manager import Manager
 
 
-# logger.add('debug.json', format='{time} {level} {message}',
-#            level='WARNING', rotation='6:00',
-#            compression='zip', serialize=True)
+logger.add('debug.json', format='{time} {level} {message}',
+           level='WARNING', rotation='6:00',
+           compression='zip', serialize=True)
 
 
 class MlDt:
@@ -237,7 +236,7 @@ class MlDt:
                                        window_std=best_rules['window_std'],
                                        plot=False)
 
-        temp[self.columns].dropna()
+        temp = temp[self.columns].dropna()
         temp.loc[:, 'predict'] = loaded_model.predict(
             temp.loc[:, self.columns].values)
         temp.loc[:, 'signal'] = np.where(
@@ -327,26 +326,6 @@ class MlDt:
                           lag=5)
         status = manager.manage()
         return status
-        # signal = self.do_signals(data)
-        # price = float(data['close'].iloc[-1])
-        # event = self._check_open_position(session=session,
-        #                                   logic=logic)
-        # if not event and signal != 0:
-        #     self._open_position(data=data, session=session,
-        #                         logic=logic, signal=signal)
-        #     send_signal = {
-        #         'name': 'ML DT',
-        #         'status': 'open',
-        #         'time': data.index[-1].to_pydatetime(),
-        #         'open': price,
-        #         'signal': signal
-        #     }
-        #     return send_signal
-        # if event:
-        #     send_status = self._close_position(session=session,
-        #                                        logic=logic, events=event,
-        #                                        current_price=price)
-        # return send_status
 
     @logger.catch
     def backtest(self,

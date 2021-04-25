@@ -1,2 +1,0 @@
-current_session = {}
-Strategies = {}
