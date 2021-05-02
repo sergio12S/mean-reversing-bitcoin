@@ -61,7 +61,7 @@ class StatisticalTest:
 class StrategiesSignals:
     @staticmethod
     def mean_reversing(data, window):
-        data['signal'] = 0
+        data['signal_mean_reversing'] = 0
         data = data.reset_index()
         data['reversion'] = data['close'].pct_change(1)
         for i, v in data.iterrows():
@@ -71,10 +71,32 @@ class StrategiesSignals:
             resistance = temp[temp['reversion'] > 0]['reversion'].mean()
             support = temp[temp['reversion'] < 0]['reversion'].mean()
             if v['reversion'] < support:
-                data.loc[i, 'signal'] = 1
+                data.loc[i, 'signal_mean_reversing'] = 1
             if v['reversion'] > resistance:
-                data.loc[i, 'signal'] = -1
-        return data.set_index('time')
+                data.loc[i, 'signal_mean_reversing'] = -1
+        data = data.set_index('time')
+        return data['signal_mean_reversing'].values
+
+    @staticmethod
+    def momentum(df, seq):
+        signals = np.zeros(len(df))
+        cons_day = 0
+        for k in range(1, len(df)):
+            price = df[k]
+            prior_price = df[k-1]
+            if price > prior_price:
+                if cons_day < 0:
+                    cons_day = 0
+                cons_day += 1
+            if price < prior_price:
+                if cons_day > 0:
+                    cons_day = 0
+                cons_day -= 1
+            if cons_day == seq:
+                signals[k] = 1
+            if cons_day == -seq:
+                signals[k] = -1
+        return signals
 
 
 class MlDt:
@@ -93,9 +115,10 @@ class MlDt:
         self.rules = []
         self.threshold = threshold
         self.money_managment = {
-            "stop_loss": -0.005,
-            "take_profit": 0.005,
-            "exit_position": 'signal'
+            "stop_loss": -0.05,
+            "take_profit": 0.05,
+            "exit_position": 'take',
+            "lag": 12
         }
         self.name_strategy = name_strategy
 
@@ -105,13 +128,20 @@ class MlDt:
         temp.loc[:, 'hours'] = temp.index.hour
         temp.loc[:, 'minutes'] = temp.index.minute
         temp.loc[:, 'dayofweek'] = temp.index.dayofweek
+        temp.loc[:, 'signal_mean_reversing'] = \
+            StrategiesSignals.mean_reversing(temp, window=50)
+        temp.loc[:, 'signal_momentun'] = \
+            StrategiesSignals.momentum(temp['close'].values, seq=2)
+
         self.columns = [
             # 'volume',
             'hours',
             'minutes',
             'dayofweek',
             'chg',
-            'ma_24'
+            'ma_24',
+            # 'signal_mean_reversing'
+            # 'signal_momentun'
         ]
         temp.loc[:, 'chg'] = temp['close'].pct_change(1)
         for i in self.window_ma_ml:
@@ -424,7 +454,7 @@ class MlDt:
                           data=signal,
                           take_profit=self.money_managment.get("take_profit"),
                           stop_loss=self.money_managment.get("stop_loss"),
-                          lag=5)
+                          lag=self.money_managment.get("lag"))
         status = manager.manage()
         return status
 
