@@ -5,15 +5,85 @@ import pickle
 from datetime import datetime
 from backtester import Backtest
 from manager import Manager
-
+from scipy import stats
+from statsmodels.tsa.stattools import grangercausalitytests
 
 logger.add('debug.json', format='{time} {level} {message}',
            level='WARNING', rotation='6:00',
            compression='zip', serialize=True)
 
 
+class StatisticalTest:
+    @staticmethod
+    def kstest(data):
+        '''
+        The Kolmogorov-Smirnov test can evaluate whether
+        a distribution is normal.
+        It provides us with a p-value.
+        If this value is significant (< 0.05),
+        sthen the data is not normal:
+        '''
+        test = stats.kstest(data, cdf="norm")
+        if test.pvalue <= 0.05:
+            '''
+            not random
+            '''
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def t_test(x, y):
+        '''
+        What is  T - test?
+        https://www.investopedia.com/terms/t/t-test.asp
+        With this test, we determine that the values are not random.
+        If the values are greater than 5%,
+        then we can reject the hypothesis that the values are random.
+        '''
+        test = stats.ttest_ind(
+            x,
+            y, equal_var=False
+        )
+        if test.pvalue >= 0.05:
+            '''
+            not random
+            '''
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def grange(data, lag):
+        return grangercausalitytests(data, lag)
+
+
+class StrategiesSignals:
+    @staticmethod
+    def mean_reversing(data, window):
+        data['signal'] = 0
+        data = data.reset_index()
+        data['reversion'] = data['close'].pct_change(1)
+        for i, v in data.iterrows():
+            if i < window:
+                continue
+            temp = data[i-window: i]
+            resistance = temp[temp['reversion'] > 0]['reversion'].mean()
+            support = temp[temp['reversion'] < 0]['reversion'].mean()
+            if v['reversion'] < support:
+                data.loc[i, 'signal'] = 1
+            if v['reversion'] > resistance:
+                data.loc[i, 'signal'] = -1
+        return data.set_index('time')
+
+
 class MlDt:
-    def __init__(self, threshold):
+    def __init__(self, threshold, name_strategy='ML DT'):
+        '''
+        threshold - parameter for otimize signal.
+        If threshold = false. Strategy not use ml.
+
+        '''
         self.window_ma_ml = np.arange(10, 100, 10)
         self.WINDOW_MA = np.arange(50, 200, 10)
         self.columns = []
@@ -22,6 +92,12 @@ class MlDt:
         self.WINDOW_STD = np.arange(100, 500, 100)
         self.rules = []
         self.threshold = threshold
+        self.money_managment = {
+            "stop_loss": -0.005,
+            "take_profit": 0.005,
+            "exit_position": 'signal'
+        }
+        self.name_strategy = name_strategy
 
     @logger.catch
     def _create_features(self, data):
@@ -37,8 +113,9 @@ class MlDt:
             'chg',
             'ma_24'
         ]
+        temp.loc[:, 'chg'] = temp['close'].pct_change(1)
         for i in self.window_ma_ml:
-            temp.loc[:, 'chg'] = temp['close'].pct_change(1)
+
             temp.loc[:, 'ma_24'] = temp['chg'].rolling(window=i).median()
             temp.loc[:, f'window_{i}'] = temp['ma_24'].rolling(window=i).std()
             self.columns.append(f'window_{i}')
@@ -46,6 +123,9 @@ class MlDt:
 
     @logger.catch
     def _machine_learning_tree(self, data):
+        '''
+        Optimizing this strategy with machine learning
+        '''
         temp = data.copy()
         temp = temp.loc[:,  self.columns + ['y']].dropna()
         X = temp.loc[:, self.columns].dropna().values
@@ -114,8 +194,9 @@ class MlDt:
                         back = Backtest()
                         temp = back.exit_by_signal(
                             data=temp,
-                            take_profit=0.005,
-                            stop_loss=-0.005,
+                            take_profit=self.money_managment.get(
+                                "take_profit"),
+                            stop_loss=self.money_managment.get("stop_loss"),
                             comission=0
                         )
 
@@ -200,9 +281,15 @@ class MlDt:
         if split_train == 1:
             temp = self._create_features(temp)
             self._machine_learning_tree(data=temp)
-            temp = self.backtest(temp, comission=0.001,  takeProfit=0.005,
-                                 stopLoss=-0.005,
-                                 exitPosition="signal", ml=True)
+            temp = self.backtest(temp,
+                                 comission=0.001,
+                                 takeProfit=self.money_managment.get(
+                                     "take_profit"),
+                                 stopLoss=self.money_managment.get(
+                                     "stop_loss"),
+                                 exitPosition=self.money_managment.get(
+                                     "exit_position"),
+                                 ml=True)
             temp['cumsum'].plot()
         if split_train < 1:
             temp = temp.reset_index()
@@ -213,12 +300,24 @@ class MlDt:
             train = self._create_features(train)
             self._machine_learning_tree(data=train)
 
-            train = self.backtest(train, comission=0.001,  takeProfit=0.005,
-                                  stopLoss=-0.005,
-                                  exitPosition="signal", ml=True)
-            test = self.backtest(test, comission=0.001,  takeProfit=0.005,
-                                 stopLoss=-0.005,
-                                 exitPosition="signal", ml=True)
+            train = self.backtest(train,
+                                  comission=0.001,
+                                  takeProfit=self.money_managment.get(
+                                      "take_profit"),
+                                  stopLoss=self.money_managment.get(
+                                      "stop_loss"),
+                                  exitPosition=self.money_managment.get(
+                                      "exit_position"),
+                                  ml=True)
+            test = self.backtest(test,
+                                 comission=0.001,
+                                 takeProfit=self.money_managment.get(
+                                     "take_profit"),
+                                 stopLoss=self.money_managment.get(
+                                     "stop_loss"),
+                                 exitPosition=self.money_managment.get(
+                                     "exit_position"),
+                                 ml=True)
             train['cumsum'].plot()
             test['cumsum'].plot()
 
@@ -236,13 +335,15 @@ class MlDt:
                                        window_std=best_rules['window_std'],
                                        plot=False)
 
-        temp = temp[self.columns].dropna()
+        temp = temp.dropna()
         temp.loc[:, 'predict'] = loaded_model.predict(
             temp.loc[:, self.columns].values)
-        temp.loc[:, 'signal'] = np.where(
-            ((temp['predict'] > self.threshold) & (temp['signal'] == 1)) |
-            ((temp['predict'] < -self.threshold) & (temp['signal'] == -1)),
-            temp['signal'], 0)
+        if self.threshold:
+            # Use machine learning to optimize model
+            temp.loc[:, 'signal'] = np.where(
+                ((temp['predict'] > self.threshold) & (temp['signal'] == 1)) |
+                ((temp['predict'] < -self.threshold) & (temp['signal'] == -1)),
+                temp['signal'], 0)
 
         return temp.tail(1)
 
@@ -321,8 +422,8 @@ class MlDt:
         signal = self.do_signals(data)
         manager = Manager(name_strategy="ML DT",
                           data=signal,
-                          take_profit=0.005,
-                          stop_loss=-0.005,
+                          take_profit=self.money_managment.get("take_profit"),
+                          stop_loss=self.money_managment.get("stop_loss"),
                           lag=5)
         status = manager.manage()
         return status
@@ -349,6 +450,10 @@ class MlDt:
                                        plot=False)
         temp = temp.dropna()
         if ml:
+            if not self.threshold:
+                logger.info(
+                    'threshold shoud be float value for machine learning mode')
+
             temp.loc[:, 'predict'] = loaded_model.predict(
                 temp[self.columns].values)
             temp.loc[:, 'signal'] = np.where(
