@@ -17,7 +17,7 @@ class Dataset:
         start = end - datetime.timedelta(days=days)
         end = end.strftime('%d %b, %Y')
         start = start.strftime('%d %b, %Y')
-        if ts not in ['1H', '30m', '5m']:
+        if ts not in ['1H', '30m', '5m', '1d']:
             print('Imput ts: 1H or 5m or 30m')
 
         if ts == "1H":
@@ -29,6 +29,9 @@ class Dataset:
         if ts == "30m":
             klines = client.get_historical_klines(
                 ticker, Client.KLINE_INTERVAL_30MINUTE, start, end)
+        if ts == "1d":
+            klines = client.get_historical_klines(
+                ticker, Client.KLINE_INTERVAL_1DAY, start, end)
 
         data = pd.DataFrame(data=[row[1:7] for row in klines],
                             columns=[
