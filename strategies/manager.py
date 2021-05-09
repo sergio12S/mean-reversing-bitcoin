@@ -1,15 +1,23 @@
 from loguru import logger
 from db import current_session, Strategies
 from datetime import timedelta
+from binance.client import Client
+KEY = ''
+SECRET_KEY = ''
+client = Client(KEY, SECRET_KEY)
 
 
 class Manager:
-    def __init__(self, name_strategy, data, take_profit, stop_loss, lag):
+    def __init__(self, name_strategy, data, take_profit, stop_loss,
+                 lag,
+                 ticker, size):
         self.name_strategy = name_strategy
         self.data = data
         self.take_profit = take_profit
         self.stop_loss = stop_loss
         self.lag = lag
+        self.ticker = ticker
+        self.size = size
 
     def _percentChange(self, openPosition, closePosition):
         return (float(closePosition) - openPosition) / abs(openPosition)
@@ -50,6 +58,17 @@ class Manager:
             'open': float(self.data['close']),
             'signal': int(self.data['signal'])
         }
+        try:
+            check_orders = client.get_open_orders(symbol=self.ticker)
+            if len(check_orders) == 1:
+                cancel = client.cancel_order(
+                    symbol=self.ticker, orderId=check_orders[0].get('orderId'))
+                if cancel.get('status') == 'CANCELED':
+                    print('Canceled previous order')
+            client.order_market_buy(symbol=self.ticker, quantity=self.size)
+        except Exception as e:
+            print(e)
+
         return status
 
     def open_short(self):
@@ -71,6 +90,16 @@ class Manager:
             'open': float(self.data['close']),
             'signal': int(self.data['signal'])
         }
+        try:
+            check_orders = client.get_open_orders(symbol=self.ticker)
+            if len(check_orders) == 1:
+                cancel = client.cancel_order(
+                    symbol=self.ticker, orderId=check_orders[0].get('orderId'))
+                if cancel.get('status') == 'CANCELED':
+                    print('Canceled previous order')
+            client.order_market_sell(symbol=self.ticker, quantity=self.size)
+        except Exception as e:
+            print(e)
         return status
 
     def close_long(self, profit):

@@ -28,4 +28,9 @@
 
 
 ## Today
-1. Automatic money managments
+[x] 1. Automatic money managments
+
+## Plan to improve strategy
+1. [x] Use price data
+2. Use volume data
+3. Use twitter data

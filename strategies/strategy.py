@@ -1,5 +1,6 @@
 from loguru import logger
 import numpy as np
+import pandas as pd
 from sklearn.tree import DecisionTreeRegressor
 import pickle
 from datetime import datetime
@@ -7,6 +8,7 @@ from backtester import Backtest
 from manager import Manager
 from scipy import stats
 from statsmodels.tsa.stattools import grangercausalitytests
+from itertools import count
 
 logger.add('debug.json', format='{time} {level} {message}',
            level='WARNING', rotation='6:00',
@@ -58,7 +60,48 @@ class StatisticalTest:
         return grangercausalitytests(data, lag)
 
 
+# Monitoring strategy
+
 class StrategiesSignals:
+    @staticmethod
+    def mean_reversing_sigma(data, sigma, lag, window_ma,
+                             window_std, plot=False):
+        temp = data.copy()
+
+        # 1 Describe value for our strategy
+        temp.loc[:, 'chg'] = temp['close'].pct_change(1)
+        temp.loc[:, 'ma_24'] = temp['chg'].rolling(window=window_ma).median()
+        temp.loc[:, 'std_ma_24'] = temp['ma_24'].rolling(
+            window=window_std).std()
+
+        # 2 Predictible value. Some logic
+        temp.loc[:, 'x1'] = np.where(
+            (temp['chg'] > temp['std_ma_24'] * sigma)
+            & (temp['chg'] > 0), temp['std_ma_24'], temp['chg'])
+
+        temp.loc[:, 'x1'] = np.where(
+            (temp['chg'] < -temp['std_ma_24'] * sigma)
+            & (temp['chg'] < 0), -temp['std_ma_24'], temp['x1']
+        )
+
+        # 3 Create signal
+        temp.loc[:, 'signal'] = np.where(
+            (temp['x1'] == -temp['std_ma_24']) &
+            (temp['x1'] < 0), 1, 0
+        )
+        temp.loc[:, 'signal'] = np.where(
+            (temp['x1'] == temp['std_ma_24']) &
+            (temp['x1'] > 0), -1, temp['signal']
+        )
+
+        #  4 Test. Find best parameters.
+        if plot:
+            temp.loc[:, 'lag'] = temp['close'].shift(-lag).pct_change()
+            temp[temp['signal'] == -1]['lag'].mean()
+            temp[temp['signal'] == 1]['lag'].cumsum().plot()
+            temp[temp['signal'] == -1]['lag'].cumsum().plot()
+        return temp
+
     @staticmethod
     def mean_reversing(data, window):
         data['signal_mean_reversing'] = 0
@@ -98,20 +141,110 @@ class StrategiesSignals:
                 signals[k] = -1
         return signals
 
+    @staticmethod
+    def unusual_volume(df, seq):
+        # Trade when we have 5% of trading voluem in 1H
+        pass
+
+
+class GridSearch:
+    def __init__(self, data, money_managment):
+        self.data = data
+        self.money_managment = money_managment
+        self.window_ma = np.arange(50, 200, 10)
+        self.window_std = np.arange(100, 500, 100)
+        self.lag = np.arange(1, 10, 1)
+        self.sigma = np.arange(1, 4, 1)
+
+    def search(self, data, rules=300):
+
+        counter = count(0)
+        rules = [
+            self.statistics(
+                lag=la,
+                sigma=s,
+                window_ma=w_ma,
+                window_std=w_std
+            ) for la in self.lag
+            for s in self.sigma
+            for w_ma in self.window_ma
+            for w_std in self.window_std
+            if next(counter) < rules
+        ]
+        return rules
+
+    def statistics(self, lag, sigma, window_ma, window_std):
+        temp = StrategiesSignals.mean_reversing_sigma(
+            data=self.data,
+            sigma=sigma, lag=lag,
+            window_ma=window_ma,
+            window_std=window_std,
+            plot=False
+        )
+        back = Backtest()
+        temp = back.exit_by_signal(
+            data=temp,
+            take_profit=self.money_managment.get(
+                "take_profit"),
+            stop_loss=self.money_managment.get("stop_loss"),
+            comission=0
+        )
+
+        # How works statregy depends on day of week
+        analyse_data_of_week = temp[['return', 'dayofweek']]\
+            .groupby('dayofweek').agg(['mean']).reset_index()
+        analyse_data_of_week.columns = ['day_of_week', 'mean']
+
+        # How works statregy depends on hours
+        analyse_hours = temp[['return', 'hours']].\
+            groupby('hours').agg(['mean']).reset_index()
+        analyse_hours.columns = ['hours', 'mean']
+
+        # How works statregy depends on minutes
+        analyse_minutes = temp[['return', 'minutes']].\
+            groupby('minutes').agg(['mean']).reset_index()
+        analyse_minutes.columns = ['minutes', 'mean']
+
+        statistics = {
+            "cumsum": temp['cumsum'].values[-1],
+            "mean":
+            temp.loc[temp['return'] != 0, 'return'].mean(),
+            "median":
+            temp.loc[temp['return'] != 0, 'return'].median(),
+            'count':
+                temp.loc[temp['return'] != 0, 'return'].count(),
+                'rules': {
+                    "sigma": sigma,
+                    "lag": lag,
+                    "window_ma": window_ma,
+                    "window_std": window_std,
+                    "day_of_week": analyse_data_of_week
+                    .to_dict(orient="records"),
+                    "hours": analyse_hours
+                    .to_dict(orient="records"),
+                    "minutes": analyse_minutes
+                    .to_dict(orient="records")
+            }
+        }
+        print(statistics)
+        return statistics
+
 
 class MlDt:
-    def __init__(self, threshold, name_strategy='ML DT'):
+    def __init__(self, threshold=0.003,
+                 name_strategy='ML DT',
+                 ticker='SFPUSDT', size=10):
         '''
         threshold - parameter for otimize signal.
         If threshold = false. Strategy not use ml.
 
         '''
+        self.ticker = ticker
+        self.size = size
+        self.mean_reversing_window = [25, 50, 75]
+        self.momentum_seq = np.arange(1, 10, 1)
         self.window_ma_ml = np.arange(10, 100, 10)
-        self.WINDOW_MA = np.arange(50, 200, 10)
         self.columns = []
-        self.SIGMA = np.arange(1, 4, 1)
-        self.LAG = np.arange(1, 10, 1)
-        self.WINDOW_STD = np.arange(100, 500, 100)
         self.rules = []
         self.threshold = threshold
         self.money_managment = {
@@ -122,26 +255,22 @@ class MlDt:
         }
         self.name_strategy = name_strategy
 
-    @logger.catch
+    @ logger.catch
     def _create_features(self, data):
         temp = data.copy()
         temp.loc[:, 'hours'] = temp.index.hour
         temp.loc[:, 'minutes'] = temp.index.minute
         temp.loc[:, 'dayofweek'] = temp.index.dayofweek
-        temp.loc[:, 'signal_mean_reversing'] = \
-            StrategiesSignals.mean_reversing(temp, window=50)
-        temp.loc[:, 'signal_momentun'] = \
-            StrategiesSignals.momentum(temp['close'].values, seq=2)
+        temp.loc[:, 'unusual_volume'] = pd.qcut(
+            data['volume'], 5,  labels=[1, 2, 3, 4, 5])
 
         self.columns = [
-            # 'volume',
+            'unusual_volume',
             'hours',
             'minutes',
             'dayofweek',
             'chg',
-            'ma_24',
-            # 'signal_mean_reversing'
-            # 'signal_momentun'
+            'ma_24'
         ]
         temp.loc[:, 'chg'] = temp['close'].pct_change(1)
         for i in self.window_ma_ml:
@@ -149,9 +278,26 @@ class MlDt:
             temp.loc[:, 'ma_24'] = temp['chg'].rolling(window=i).median()
             temp.loc[:, f'window_{i}'] = temp['ma_24'].rolling(window=i).std()
             self.columns.append(f'window_{i}')
+
+        # Create mean reversing signals
+        for i in self.mean_reversing_window:
+            temp.loc[:, f'signal_mean_reversing_{i}'] = \
+                StrategiesSignals.mean_reversing(
+                    temp, window=i
+            )
+            self.columns.append(f'signal_mean_reversing_{i}')
+
+        # Create momentum signals
+        for i in self.momentum_seq:
+            temp.loc[:, f'signal_momentum_{i}'] = \
+                StrategiesSignals.momentum(
+                    temp['close'].values, seq=i
+            )
+            self.columns.append(f'signal_momentum_{i}')
+
         return temp
 
-    @logger.catch
+    @ logger.catch
     def _machine_learning_tree(self, data):
         '''
         Optimizing this strategy with machine learning
@@ -166,120 +312,16 @@ class MlDt:
             'ml_model_tree', 'wb'))
         return
 
-    @logger.catch
-    def _optimal_parameter(self, data, sigma, lag, window_ma,
-                           window_std, plot=False):
-        temp = data.copy()
-
-        # 1 Describe value for our strategy
-        temp.loc[:, 'chg'] = temp['close'].pct_change(1)
-        temp.loc[:, 'ma_24'] = temp['chg'].rolling(window=window_ma).median()
-        temp.loc[:, 'std_ma_24'] = temp['ma_24'].rolling(
-            window=window_std).std()
-
-        # 2 Predictible value. Some logic
-        temp.loc[:, 'x1'] = np.where(
-            (temp['chg'] > temp['std_ma_24'] * sigma)
-            & (temp['chg'] > 0), temp['std_ma_24'], temp['chg'])
-
-        temp.loc[:, 'x1'] = np.where(
-            (temp['chg'] < -temp['std_ma_24'] * sigma)
-            & (temp['chg'] < 0), -temp['std_ma_24'], temp['x1']
-        )
-
-        # 3 Create signal
-        temp.loc[:, 'signal'] = np.where(
-            (temp['x1'] == -temp['std_ma_24']) &
-            (temp['x1'] < 0), 1, 0
-        )
-        temp.loc[:, 'signal'] = np.where(
-            (temp['x1'] == temp['std_ma_24']) &
-            (temp['x1'] > 0), -1, temp['signal']
-        )
-
-        #  4 Test. Find best parameters.
-        if plot:
-            temp.loc[:, 'lag'] = temp['close'].shift(-lag).pct_change()
-            temp[temp['signal'] == -1]['lag'].mean()
-            temp[temp['signal'] == 1]['lag'].cumsum().plot()
-            temp[temp['signal'] == -1]['lag'].cumsum().plot()
-        return temp
-
-    def _create_rules(self, data, rules=300, reverse=False):
+    def _create_rules(self, data, rules=300):
         temp = data.copy()
         temp = self._create_features(temp).dropna()
+        grid = GridSearch(data=temp, money_managment=self.money_managment)
+        return grid.search(data=temp, rules=rules)
 
-        count_rules = 0
-
-        data_rules = []
-        for s in self.SIGMA:
-            for la in self.LAG:
-                for w_ma in self.WINDOW_MA:
-                    for w_std in self.WINDOW_STD:
-                        temp = self._optimal_parameter(
-                            data=temp,
-                            sigma=s, lag=la, window_ma=w_ma, window_std=w_std,
-                            plot=False
-                        )
-                        back = Backtest()
-                        temp = back.exit_by_signal(
-                            data=temp,
-                            take_profit=self.money_managment.get(
-                                "take_profit"),
-                            stop_loss=self.money_managment.get("stop_loss"),
-                            comission=0
-                        )
-
-                        # How works statregy depends on day of week
-                        analyse_data_of_week = temp[['return', 'dayofweek']]\
-                            .groupby('dayofweek').agg(['mean']).reset_index()
-                        analyse_data_of_week.columns = ['day_of_week', 'mean']
-
-                        # How works statregy depends on hours
-                        analyse_hours = temp[['return', 'hours']].\
-                            groupby('hours').agg(['mean']).reset_index()
-                        analyse_hours.columns = ['hours', 'mean']
-
-                        # How works statregy depends on minutes
-                        analyse_minutes = temp[['return', 'minutes']].\
-                            groupby('minutes').agg(['mean']).reset_index()
-                        analyse_minutes.columns = ['minutes', 'mean']
-
-                        statistics = {
-                            "cumsum": temp['cumsum'].values[-1],
-                            "mean":
-                            temp.loc[temp['return'] != 0, 'return'].mean(),
-                            "median":
-                            temp.loc[temp['return'] != 0, 'return'].median(),
-                            'count':
-                            temp.loc[temp['return'] != 0, 'return'].count(),
-                            'rules': {
-                                "sigma": s,
-                                "lag": la,
-                                "window_ma": w_ma,
-                                "window_std": w_std,
-                                "day_of_week": analyse_data_of_week
-                                .to_dict(orient="records"),
-                                "hours": analyse_hours
-                                .to_dict(orient="records"),
-                                "minutes": analyse_minutes
-                                .to_dict(orient="records")
-                            }
-                        }
-                        # print(statistics)
-                        data_rules.append(dict(statistics))
-                        count_rules += 1
-                        print('Rules: ', count_rules)
-                        print('Backtest result: ', temp['cumsum'].values[-1])
-                        if count_rules == rules:
-                            return data_rules
-        return data_rules
-
-    def _save_rules(self, data, rules=300, reverse=False):
+    def _save_rules(self, data, rules=300):
         self.rules = self._create_rules(
             data=data,
-            rules=rules,
-            reverse=reverse
+            rules=rules
         )
         # Save rules
         if self.rules:
@@ -304,7 +346,7 @@ class MlDt:
         best_rules['minutes']
         return best_rules
 
-    @logger.catch
+    @ logger.catch
     def create_machine_learning_models(self, data, split_train=1, lag=1):
         temp = data.copy()
         temp.loc[:, 'y'] = temp['close'].shift(-lag).pct_change()
@@ -351,19 +393,20 @@ class MlDt:
             train['cumsum'].plot()
             test['cumsum'].plot()
 
-    @logger.catch
+    @ logger.catch
     def do_signals(self, data):
         temp = data.copy()
         temp = self._create_features(temp)
         loaded_model = pickle.load(
             open('ml_model_tree', 'rb'))
         best_rules = self._best_rules()
-        temp = self._optimal_parameter(data=temp,
-                                       sigma=best_rules['sigma'],
-                                       lag=best_rules['lag'],
-                                       window_ma=best_rules['window_ma'],
-                                       window_std=best_rules['window_std'],
-                                       plot=False)
+        temp = StrategiesSignals\
+            .mean_reversing_sigma(data=temp,
+                                  sigma=best_rules['sigma'],
+                                  lag=best_rules['lag'],
+                                  window_ma=best_rules['window_ma'],
+                                  window_std=best_rules['window_std'],
+                                  plot=False)
 
         temp = temp.dropna()
         temp.loc[:, 'predict'] = loaded_model.predict(
@@ -377,7 +420,7 @@ class MlDt:
 
         return temp.tail(1)
 
-    @logger.catch
+    @ logger.catch
     def _open_position(self, data, session, logic, signal):
         curent_price = float(data['close'].iloc[-1])
         if signal == 1:
@@ -404,7 +447,7 @@ class MlDt:
             session.add(new_trade)
             session.commit()
 
-    @logger.catch
+    @ logger.catch
     def _check_open_position(self, session, logic):
         events = session.query(logic).with_entities(
             logic.Strategy,
@@ -423,7 +466,7 @@ class MlDt:
         ).order_by(logic.Time.desc()).first()
         return events
 
-    @logger.catch
+    @ logger.catch
     def _close_position(self, session, logic, current_price, events):
         profit = (current_price / events.Open - 1) / events.Signal
         session.query(logic).filter(
@@ -447,18 +490,21 @@ class MlDt:
         }
         return send_status
 
-    @logger.catch
+    @ logger.catch
     def run_strategy(self, data):
         signal = self.do_signals(data)
         manager = Manager(name_strategy="ML DT",
                           data=signal,
                           take_profit=self.money_managment.get("take_profit"),
                           stop_loss=self.money_managment.get("stop_loss"),
-                          lag=self.money_managment.get("lag"))
+                          lag=self.money_managment.get("lag"),
+                          ticker=self.ticker,
+                          size=self.size
+                          )
         status = manager.manage()
         return status
 
-    @logger.catch
+    @ logger.catch
     def backtest(self,
                  data,
                  lag=1,
@@ -471,13 +517,16 @@ class MlDt:
         temp = self._create_features(temp)
         loaded_model = pickle.load(
             open('ml_model_tree', 'rb'))
-        best_rules = self._best_rules()
-        temp = self._optimal_parameter(data=temp,
-                                       sigma=best_rules['sigma'],
-                                       lag=best_rules['lag'],
-                                       window_ma=best_rules['window_ma'],
-                                       window_std=best_rules['window_std'],
-                                       plot=False)
+        # best_rules = self._best_rules()
+        # temp = StrategiesSignals\
+        #     .mean_reversing_sigma(data=temp,
+        #                           sigma=best_rules['sigma'],
+        #                           lag=best_rules['lag'],
+        #                           window_ma=best_rules['window_ma'],
+        #                           window_std=best_rules['window_std'],
+        #                           plot=False)
+        temp['signal'] = StrategiesSignals\
+            .mean_reversing(data=temp, window=100)
         temp = temp.dropna()
         if ml:
             if not self.threshold:
