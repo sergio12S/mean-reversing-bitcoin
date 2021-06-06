@@ -207,13 +207,18 @@ class Reward():
         self.position['time_open'] = data['time']
         self.position['status'] = 'long'
         self.position['open_price'] = data['open_price']
+        self.position['close_price'] = data['close_price']
+        self.position['reward'] = data['reward']
+
         self.position['signal'] = 1
 
     def _open_short(self, data):
         self.position['time_open'] = data['time']
         self.position['status'] = 'short'
         self.position['open_price'] = data['open_price']
+        self.position['close_price'] = data['close_price']
         self.position['signal'] = -1
+        self.position['reward'] = data['reward']
 
     def _reward_long(self, data):
         self.wait_window = 0
@@ -234,10 +239,8 @@ class Reward():
 
         self.position['status'] = 'close'
         self.position['time_close'] = data['time']
-        self.position['ib_price'] = data['ib_price']
-        self.position['ep_price'] = data['ep_price']
         self.position['reward'] = (
-            self.position['ep_price'] - self.position['ib_price']) \
+            self.position['close_price'] - self.position['open_price']) \
             * self.position['signal']
         self.balance.append(dict(self.position))
         self.total_profit += self.position['reward']
@@ -274,19 +277,19 @@ class Reward():
 
         # Hold and Close the long position
         if status_position == 'long':
-            self.wait_window += 1
-            if self.wait_window < self.window:
-                return 5
-            if self.wait_window == self.window:
-                return self._reward_long(data=data)
+            # self.wait_window += 1
+            # if self.wait_window < self.window:
+            #     return 5
+            # if self.wait_window == self.window:
+            return self._reward_long(data=data)
 
         # Hold and Close the short position
         if status_position == 'short':
-            self.wait_window += 1
-            if self.wait_window < self.window:
-                return 5
-            if self.wait_window == self.window:
-                return self._reward_short(data=data)
+            # self.wait_window += 1
+            # if self.wait_window < self.window:
+            #     return 5
+            # if self.wait_window == self.window:
+            return self._reward_short(data=data)
 
     def plot_profit(self, name='', show=True, iter=1):
         data = list(map(lambda x: x['reward'], self.balance))
