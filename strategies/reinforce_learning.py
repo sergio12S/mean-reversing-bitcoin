@@ -301,6 +301,16 @@ class Reward():
             return
         plt.savefig(f"results/{name} + '_' + {iter}+ _.png")
 
+    def plot_profit_detail(self, name='', show=True, iter=1):
+        data = list(map(lambda x: x['reward'], self.balance))
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(np.cumsum(data), 'o-')
+        ax.set_title('Balance')
+        if show:
+            plt.show()
+            return
+        plt.savefig(f"results/{name} + '_' + {iter}+ _.png")
+
 
 class Agent():
 
@@ -495,3 +505,147 @@ class Agent():
             if episode % 1 == 0:
                 self.reward.plot_profit(
                     name=self.name, show=False, iter=episode)
+
+    def indexes(self):
+
+        # Set seed
+        train = self.data.copy()
+
+        # Calculate number of days
+        train['days'] = train.index.day_of_year
+        train['number_days'] = 0
+        count_days = 0
+        previous = 0
+        for i, v in train.iterrows():
+            if v['days'] != previous:
+                count_days += 1
+            previous = v['days']
+            train.loc[i, 'number_days'] = count_days
+        train.loc[:, 'number_days'] = train['number_days'] - 1
+        train.loc[:, 'number_days'].values[0]
+
+        # Define train and test time indexex for split data
+
+        train_days = []
+        test_days = []
+        max_days = train['number_days'].max()
+        wait = 0
+        for i, v in train.iterrows():
+            # check wait
+            if v['number_days'] >= wait:
+                # chek len days
+                if v['number_days'] + \
+                        self.t_settings.get('training_time') > max_days:
+                    break
+                temp_train = {
+                    'start': v['number_days'],
+                    'end': v['number_days'] +
+                    self.t_settings.get('training_time') - 1
+                }
+                train_days.append(temp_train)
+                temp_test = {
+                    'start': v['number_days'] +
+                    self.t_settings.get('training_time') + 1,
+                    'end': v['number_days'] +
+                    self.t_settings.get('training_time') +
+                    self.t_settings.get('testing_time')
+                }
+                test_days.append(temp_test)
+                wait = v['number_days'] + self.t_settings.get('testing_time')
+        return train, train_days, test_days
+
+        # For multiprocessing
+
+    def train_episode(self, train, iterate):
+        i_train, i_test = iterate
+
+        # Define train and test basic on index
+        train_rf = train[(train['number_days'] >= i_train.get('start')) & (
+            train['number_days'] <= i_train.get('end'))]
+        test_rf = train[(train['number_days'] >= i_test.get('start')) & (
+            train['number_days'] <= i_test.get('end'))]
+
+        train_rf = train_rf.reset_index()
+        test_rf = test_rf.reset_index()
+
+        # train process
+        data_samples = len(train_rf) - 1
+        for episode in range(1, self.episodes + 1):
+            print("Episode: {}/{}".format(episode, self.episodes))
+            self.reward.reset_balance()
+            state = self.env.state_create(
+                data=train_rf[self.X_var].values,
+                window_size=self.window_size,
+                iterator=0)
+            for t in tqdm(range(data_samples)):
+                action = self.epsilon_greedy_policy(state)
+
+                next_state = self.env.state_create(
+                    data=train_rf[self.X_var].values,
+                    iterator=t+1,
+                    window_size=self.window_size)
+
+                status_position = self.reward.check_status_position()
+                reward = self.reward._managment_take(
+                    action=action,
+                    status_position=status_position,
+                    data=train_rf.iloc[t, :]
+                )
+
+                if t == data_samples - 1:
+                    done = True
+                    result_model = {
+                        'epoch': episode,
+                        'total_profit': self.reward.get_result()
+                    }
+                    print(result_model)
+
+                    # Save best model
+                    list_result = list(
+                        map(lambda i: i['total_profit'],
+                            self.reward.get_epochs_profit())
+                    )
+                    best_result = 0
+                    if len(list_result):
+                        best_result = max(list_result)
+                    self.reward.add_epochs_profit(result_model)
+                    if self.reward.get_result() > best_result:
+
+                        # Save best model
+                        self.model.save_model(
+                            memory=self.memory.get_memory(),
+                            name=f'best_{str(list(i_train.values()))}'
+                        )
+                        # Save best results
+                        pd.DataFrame(self.reward.balance)\
+                            .to_csv(f'results/{self.name}_\
+                                {str(list(i_train.values()))}.csv')
+
+                        print('Best result: {}'.format(
+                            self.reward.get_result()))
+                        print(self.name)
+
+                else:
+                    done = False
+                self.memory.add_memory(
+                    (state, action, reward, next_state, done))
+                state = next_state
+                # Update epsilon
+                self._update_epsilon()
+                # Update agents' experience
+                self.experience_replay()
+            if episode % 1 == 0:
+                self.reward.plot_profit_detail(
+                    name=f'{self.name}_{str(list(i_train.values()))}',
+                    show=False,
+                    iter=episode)
+
+        # test process
+        try:
+            self.run_online(
+                test_rf,
+                train_index=str(list(i_train.values())),
+                test_index=str(list(i_test.values()))
+            )
+        except Exception as e:
+            print(e)
