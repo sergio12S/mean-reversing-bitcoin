@@ -8,7 +8,7 @@ while True:
     print("Update data:", datetime.now())
     sleep = 5 - datetime.now().minute % 5
     if sleep == 5:
-        TICKER = "SFPUSDT"
+        TICKER = "BTCUSDT"
         data_binance = Dataset()
         data = data_binance.get_data(days=90, ticker=TICKER, ts='1H')
         # ? Check settings in settings.ipynb to manage it
