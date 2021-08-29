@@ -47,4 +47,3 @@ X_train_minmax = mm_scaler.fit_transform(X)
 # mm_scaler.transform(X)
 reg = LinearRegression().fit(X_train_minmax, y)
 reg.score(X_train_minmax, y)
-u

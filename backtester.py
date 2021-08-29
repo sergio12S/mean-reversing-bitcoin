@@ -36,10 +36,7 @@ class Backtester:
             return False
 
     def _check_status(self):
-        if self.status == 'open':
-            return True
-        else:
-            return False
+        return self.status == 'open'
 
     def _close_position(self, position, iterator):
         if self.positionData == {}:
